@@ -1,0 +1,173 @@
+---
+title: "Human Activity Recognition - Machine Learning Project"
+author: "Ronaldo A Oliveira"
+date: "2016-10-09"
+output: html_document
+---
+
+## Introduction
+
+Human Activity Recognition - HAR - has emerged as a key research area in the last years and is gaining increasing attention by the pervasive computing research community (see picture below, that illustrates the increasing number of publications in HAR with wearable accelerometers), especially for the development of context-aware systems. There are many potential applications for HAR, like: elderly monitoring, life log systems for monitoring energy expenditure and for supporting weight-loss programs, and digital assistants for weight lifting exercises.
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: <http://groupware.les.inf.puc-rio.br/har>.
+
+
+## Goal of the Study
+
+The goal of this study is to predict the manner in which the participants of research did the exercise. For this, we are going to predict 20 different tests cases in one of these classes:
+
+* Class A - exactly according to the specification
+* Class B - throwing the elbows to the front
+* Class C - lifting the dumbbell only halfway
+* Class D - lowering the dumbbell only halfway
+* Class E - throwing the hips to the front.
+
+This report describes how the model for the project was built, its cross validation, expected out of sample error calculation, and the choices made.
+
+
+## Loading Data Sets
+
+The data for this project come from this source: <http://groupware.les.inf.puc-rio.br/har>. 
+
+```{r preparing, message=FALSE, include=TRUE, warning=FALSE}
+set.seed(197604)
+
+library(caret)
+
+trainingSet <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+                     na.strings = c("", "NA", "#DIV/0!"))
+testingSet <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+                    na.strings = c("", "NA", "#DIV/0!"))
+
+```
+
+```{r dimensions, message=FALSE}
+rbind("Training" = dim(trainingSet), "Testing" = dim(testingSet))
+
+```
+
+
+## Cleaning Data Set (Feature Selection)
+
+In this step, we are going to remove the variables that aren't useful to explain the outcome. To make this, we will remove all columns with zero variance, with NA values over than 50% of column, columns with text information and, finally, columns with values with high correlations with other column(s). As result, we will able to obtain a data set with all columns that are important and representative to try to explain the outcome.
+
+```{r cleaningData, message=FALSE}
+# Remove columns with zero variance
+nzv <- nearZeroVar(trainingSet)
+trainingSet <- trainingSet[, -nzv]
+
+# Remove columns with NA values over 50%
+na <- sapply(trainingSet, function(x) mean(is.na(x))) > 0.5
+trainingSet <- trainingSet[, na == FALSE]
+
+# Remove columns with text information
+trainingSet <- trainingSet[, -c(1:6)]
+
+# Remove parameters with high correlations
+idxCorrel <- findCorrelation(cor(trainingSet[, -53]), cutoff = 0.75)
+trainingSet <- trainingSet[, -idxCorrel]
+
+dim(trainingSet)
+
+```
+
+We can see that we start the process with 160 variables available in the data set and finished with only 32 necessaries.
+
+
+## Defining Training and Testing Data Sets
+
+As we have a testing data set, we just have to split our training data set in two others sets: a "new" training and a "new" testing data sets. These two data sets will be used to try to build the models and try to find the best one.
+
+In this process, we broke the original training set in 70% to new training set and the rest (30%) to new testing set.
+
+``` {r buildTrainTest}
+idx <- createDataPartition(trainingSet$classe, p = 0.7, list = FALSE)
+train <- trainingSet[idx, ]
+test <- trainingSet[-idx, ]
+
+```
+
+
+## Building Models
+
+With these predictors selected, it was necessary to build a couple of models with different methods to evaluate which the best is. To this, we focus on five algorithms or approaches: *Classification And Regression Trees* (CART), *Gradient Boosting Machine* (gbm), *Neural Network*, *Regularized Discriminant Analysis* (rda), and *Random Forest*.
+
+Before we apply these methods, we create a *cross validation control* to guarantee the same approach for all methods. In this setting, we use a **cross validation** with 3 folds or number of resampling iterations.
+
+``` {r buildModels, message=FALSE, results='hide', warning=FALSE}
+fitCtrl <- trainControl(method = "cv", number = 3, classProbs = TRUE, allowParallel = TRUE)
+
+rpartFit <- train(classe ~ ., data = train, method = "rpart", trControl = fitCtrl)
+gbmFit <- train(classe ~ ., data = train, method = "gbm", trControl = fitCtrl)
+nnetFit <- train(classe ~ ., data = train, method = "nnet", trControl = fitCtrl)
+rdaFit <- train(classe ~ ., data = train, method = "rda", trControl = fitCtrl)
+rfFit <- train(classe ~ ., data = train, method = "rf", trControl = fitCtrl)
+
+```
+
+After the build the models, we calculate the predictions. These predictions will be used to check the precision and/or quality of each model to try to select the best one.
+
+``` {r buildPredictions, message=FALSE}
+rpartPred <- predict(rpartFit, newdata = test)
+gbmPred <- predict(gbmFit, newdata = test)
+nnetPred <- predict(nnetFit, newdata = test)
+rdaPred <- predict(rdaFit, newdata = test)
+rfPred <- predict(rfFit, newdata = test)
+
+```
+
+
+## Comparing Models
+
+To try to select the best model, it was used confusion matrix (accuracy and kappa parameters) and resamples function.
+
+``` {r confisionMatrix, message=FALSE}
+rpartConfMatrix <- confusionMatrix(rpartPred, test$classe)
+rpartConfMatrix$table
+
+gbmConfMatrix <- confusionMatrix(gbmPred, test$classe)
+gbmConfMatrix$table
+
+nnetConfMatrix <- confusionMatrix(nnetPred, test$classe)
+nnetConfMatrix$table
+
+rdaConfMatrix <- confusionMatrix(rdaPred, test$classe)
+rdaConfMatrix$table
+
+rfConfMatrix <- confusionMatrix(rfPred, test$classe)
+rfConfMatrix$table
+
+```
+
+To make easier to compare the results, we build a summary table with the accuracy and kappa values from each method applied.
+
+Method | Accuracy | Kappa
+-------------|------------|-----------------------
+CART | `r rpartConfMatrix$overall[1]` | `r rpartConfMatrix$overall[2]`
+GBM | `r gbmConfMatrix$overall[1]` | `r gbmConfMatrix$overall[2]`
+Neural Network | `r nnetConfMatrix$overall[1]` | `r nnetConfMatrix$overall[2]`
+RDA | `r rdaConfMatrix$overall[1]` | `r rdaConfMatrix$overall[2]`
+Random Forest | **`r rfConfMatrix$overall[1]`** | **`r rfConfMatrix$overall[2]`**
+
+From this table, we can see that the best model is obtained from **Radom Forest** method.
+
+```{r resampleResult, message=FALSE}
+summary(resamples(list(rpart = rpartFit, gbm = gbmFit, nnet = nnetFit, rda = rdaFit, rf = rfFit)))
+```
+
+We can see too that the best model is obtained using **Random Forest** method.
+
+```{r plotResult, message=FALSE,  fig.height = 4.5, fig.width = 6.5, results="hold"}
+bwplot(resamples(list(rpart = rpartFit, gbm = gbmFit, nnet = nnetFit, rda = rdaFit, rf = rfFit)))
+
+```
+
+
+## Results
+
+Once selected the best model, we apply this model to our original testing data set to obtain the final predictions.
+
+``` {r results}
+predFinal <- predict(rfFit, newdata = testingSet)
+predFinal
+```
